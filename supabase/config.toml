@@ -1,1 +1,7 @@
 project_id = "vecqofqqcpqcfoylpwaf"
+
+[functions.check-rank]
+verify_jwt = false
+
+[functions.ranking-history]
+verify_jwt = false
