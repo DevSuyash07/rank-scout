@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { History } from "lucide-react";
+import { History, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import RankForm from "@/components/RankForm";
 import ResultsTable from "@/components/ResultsTable";
 
 const Index = () => {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const { user, signOut } = useAuth();
 
   return (
     <main className="min-h-screen bg-background py-16 px-4">
@@ -20,13 +22,25 @@ const Index = () => {
               Professional keyword position tracking. Check where your domain ranks on Google.
             </p>
           </div>
-          <Link
-            to="/history"
-            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-[var(--radius-inner)] hover:bg-secondary"
-          >
-            <History className="h-4 w-4" />
-            History
-          </Link>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[160px]">
+              {user?.email}
+            </span>
+            <Link
+              to="/history"
+              className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-[var(--radius-inner)] hover:bg-secondary"
+            >
+              <History className="h-4 w-4" />
+              History
+            </Link>
+            <button
+              onClick={signOut}
+              className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-destructive transition-colors px-3 py-2 rounded-[var(--radius-inner)] hover:bg-destructive/10"
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </button>
+          </div>
         </header>
 
         <section className="bg-card rounded-[var(--radius)] shadow-card p-6">

@@ -27,6 +27,22 @@ Deno.serve(async (req) => {
       throw new Error("SERP_API_KEY is not configured");
     }
 
+    // Extract user from JWT
+    const authHeader = req.headers.get("authorization") || "";
+    const supabaseClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -34,7 +50,6 @@ Deno.serve(async (req) => {
 
     const { keywords, domain, location, device } = await req.json();
 
-    // Validate inputs
     if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
       throw new Error("Keywords array is required");
     }
@@ -45,7 +60,6 @@ Deno.serve(async (req) => {
       throw new Error("Maximum 50 keywords per request");
     }
 
-    // Sanitize domain
     const cleanDomain = domain
       .replace(/^https?:\/\//, "")
       .replace(/^www\./, "")
@@ -104,7 +118,6 @@ Deno.serve(async (req) => {
             device: device || "desktop",
           };
 
-          // Save to DB
           await supabase.from("rankings").insert({
             keyword: result.keyword,
             domain: result.domain,
@@ -112,6 +125,7 @@ Deno.serve(async (req) => {
             device: result.device,
             position: result.position,
             url: result.url,
+            user_id: user.id,
           });
 
           return result;

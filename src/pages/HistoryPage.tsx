@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, LogOut } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 
 interface RankingRecord {
   id: string;
@@ -17,13 +19,15 @@ const HistoryPage = () => {
   const [records, setRecords] = useState<RankingRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [domainFilter, setDomainFilter] = useState("");
+  const { user, signOut } = useAuth();
 
   const fetchHistory = async () => {
     setLoading(true);
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const params = new URLSearchParams({ limit: "200" });
       if (domainFilter.trim()) {
         params.set("domain", domainFilter.trim());
@@ -33,7 +37,7 @@ const HistoryPage = () => {
         `${supabaseUrl}/functions/v1/ranking-history?${params.toString()}`,
         {
           headers: {
-            Authorization: `Bearer ${anonKey}`,
+            Authorization: `Bearer ${session.access_token}`,
           },
         }
       );
@@ -73,8 +77,20 @@ const HistoryPage = () => {
               Ranking History
             </h1>
             <p className="text-muted-foreground text-sm">
-              Browse previous keyword ranking checks.
+              Browse your previous keyword ranking checks.
             </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[160px]">
+              {user?.email}
+            </span>
+            <button
+              onClick={signOut}
+              className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-destructive transition-colors px-3 py-2 rounded-[var(--radius-inner)] hover:bg-destructive/10"
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </button>
           </div>
         </header>
 

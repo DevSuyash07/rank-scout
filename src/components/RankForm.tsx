@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Loader2, Search } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 interface RankFormProps {
   onResults: (results: any[]) => void;
@@ -55,9 +56,14 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
     }
 
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setError("You must be logged in.");
+        setLoading(false);
+        return;
+      }
+
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
       const res = await fetch(
         `${supabaseUrl}/functions/v1/check-rank`,
@@ -65,7 +71,7 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${anonKey}`,
+            Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
             ...formData,
