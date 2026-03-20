@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { Loader2, Search } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Loader2, Search, BarChart3 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { Progress } from "@/components/ui/progress";
 
 interface RankFormProps {
   onResults: (results: any[]) => void;
@@ -18,6 +19,8 @@ const LOCATIONS = [
   "France",
 ];
 
+const MONTHLY_LIMIT = 1000;
+
 export default function RankForm({ onResults, loading, setLoading }: RankFormProps) {
   const [formData, setFormData] = useState({
     keywords: "",
@@ -26,6 +29,30 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
     device: "desktop",
   });
   const [error, setError] = useState("");
+  const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null);
+
+  useEffect(() => {
+    fetchUsage();
+  }, []);
+
+  const fetchUsage = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      const { data } = await supabase
+        .from("user_usage")
+        .select("searches_used")
+        .eq("user_id", session.user.id)
+        .eq("month", currentMonth)
+        .maybeSingle();
+
+      setUsage({ used: data?.searches_used ?? 0, limit: MONTHLY_LIMIT });
+    } catch {
+      // silently fail
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,10 +110,12 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
       const data = await res.json();
 
       if (!res.ok) {
+        if (data.usage) setUsage(data.usage);
         throw new Error(data.error || "Failed to check rankings");
       }
 
-      onResults(data);
+      if (data.usage) setUsage(data.usage);
+      onResults(data.results || data);
     } catch (err: any) {
       setError(err.message || "Something went wrong. Please try again.");
     } finally {
@@ -94,8 +123,32 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
     }
   };
 
+  const usagePercent = usage ? Math.min((usage.used / usage.limit) * 100, 100) : 0;
+  const limitReached = usage ? usage.used >= usage.limit : false;
+
   return (
     <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* Usage display */}
+      {usage && (
+        <div className="md:col-span-2 flex flex-col gap-2 p-4 rounded-[var(--radius-inner)] bg-secondary/50 ring-1 ring-border">
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1.5 text-muted-foreground font-medium">
+              <BarChart3 className="h-4 w-4" />
+              Monthly Usage
+            </span>
+            <span className={`font-semibold tabular-nums ${limitReached ? "text-destructive" : "text-foreground"}`}>
+              {usage.used} / {usage.limit} searches
+            </span>
+          </div>
+          <Progress value={usagePercent} className="h-2" />
+          {limitReached && (
+            <p className="text-xs text-destructive font-medium">
+              You have reached your monthly limit. Usage resets next month.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="md:col-span-2">
         <label className="block text-sm font-medium mb-2 text-muted-foreground">
           Keywords <span className="text-muted-foreground/60">(one per line, max 50)</span>
@@ -161,7 +214,7 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
 
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || limitReached}
         className="md:col-span-2 w-full bg-primary text-primary-foreground font-medium py-3 rounded-[var(--radius-inner)] hover:opacity-90 disabled:opacity-50 transition-all text-sm flex items-center justify-center gap-2"
       >
         {loading ? (
