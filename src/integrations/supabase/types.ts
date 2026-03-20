@@ -50,6 +50,27 @@ export type Database = {
         }
         Relationships: []
       }
+      user_usage: {
+        Row: {
+          id: string
+          month: string
+          searches_used: number
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          month: string
+          searches_used?: number
+          user_id: string
+        }
+        Update: {
+          id?: string
+          month?: string
+          searches_used?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
