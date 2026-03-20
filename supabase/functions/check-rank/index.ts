@@ -148,19 +148,20 @@ Deno.serve(async (req) => {
 
             const data = await response.json();
             console.log(`Searlo response for "${keyword}" page ${page}:`, JSON.stringify({
-              success: data.success,
-              itemCount: data.items?.length,
-              hasNextPage: data.searchInformation?.hasNextPage,
+              organicCount: data.organic?.length,
+              nextPage: data.nextPage,
+              page: data.page,
             }));
             
-            const items = data.items || [];
+            // API returns "organic" array with "position" field
+            const organic = data.organic || [];
 
             // Match domain in result URLs or domain field
-            for (const item of items) {
+            for (const item of organic) {
               const itemDomain = (item.domain || "").toLowerCase();
               const itemLink = (item.link || "").toLowerCase();
               if (itemDomain.includes(cleanDomain) || itemLink.includes(cleanDomain)) {
-                matchRank = item.rank;
+                matchRank = item.position;
                 matchLink = item.link;
                 break;
               }
@@ -169,7 +170,7 @@ Deno.serve(async (req) => {
             if (matchRank) break;
 
             // Stop if no more pages
-            if (!data.searchInformation?.hasNextPage || items.length === 0) {
+            if (!data.nextPage || organic.length === 0) {
               break;
             }
           }
