@@ -6,25 +6,15 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-const LOCATION_MAP: Record<string, string> = {
-  "United States": "us",
-  "United Kingdom": "uk",
-  India: "in",
-  Canada: "ca",
-  Australia: "au",
-  Germany: "de",
-  France: "fr",
-};
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const SERP_API_KEY = Deno.env.get("SERP_API_KEY");
-    if (!SERP_API_KEY) {
-      throw new Error("SERP_API_KEY is not configured");
+    const SEARLO_API_KEY = Deno.env.get("SEARLO_API_KEY");
+    if (!SEARLO_API_KEY) {
+      throw new Error("SEARLO_API_KEY is not configured");
     }
 
     // Extract user from JWT
@@ -60,14 +50,41 @@ Deno.serve(async (req) => {
       throw new Error("Maximum 50 keywords per request");
     }
 
+    const keywordCount = keywords.filter((k: string) => k.trim()).length;
+
+    // --- Usage limit check ---
+    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+
+    const { data: usageRow, error: usageError } = await supabase
+      .from("user_usage")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("month", currentMonth)
+      .maybeSingle();
+
+    if (usageError) throw usageError;
+
+    const currentUsage = usageRow?.searches_used ?? 0;
+
+    if (currentUsage + keywordCount > 1000) {
+      return new Response(
+        JSON.stringify({
+          error: "Monthly limit reached",
+          usage: { used: currentUsage, limit: 1000 },
+        }),
+        {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     const cleanDomain = domain
       .replace(/^https?:\/\//, "")
       .replace(/^www\./, "")
       .replace(/\/.*$/, "")
       .toLowerCase()
       .trim();
-
-    const gl = LOCATION_MAP[location] || "us";
 
     const results = await Promise.all(
       keywords.map(async (kw: string) => {
@@ -76,22 +93,22 @@ Deno.serve(async (req) => {
 
         try {
           const params = new URLSearchParams({
-            engine: "google",
             q: keyword,
             location: location || "United States",
-            gl,
-            hl: "en",
             device: device || "desktop",
-            num: "100",
-            api_key: SERP_API_KEY,
           });
 
           const response = await fetch(
-            `https://serpapi.com/search?${params.toString()}`
+            `https://api.searlo.tech/api/v1/search?${params.toString()}`,
+            {
+              headers: {
+                Authorization: `Bearer ${SEARLO_API_KEY}`,
+              },
+            }
           );
 
           if (!response.ok) {
-            console.error(`SerpAPI error for "${keyword}": ${response.status}`);
+            console.error(`Searlo API error for "${keyword}": ${response.status}`);
             return {
               keyword,
               position: "Error",
@@ -145,9 +162,24 @@ Deno.serve(async (req) => {
 
     const filtered = results.filter(Boolean);
 
-    return new Response(JSON.stringify(filtered), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    // --- Update usage ---
+    if (usageRow) {
+      await supabase
+        .from("user_usage")
+        .update({ searches_used: currentUsage + keywordCount })
+        .eq("id", usageRow.id);
+    } else {
+      await supabase.from("user_usage").insert({
+        user_id: user.id,
+        month: currentMonth,
+        searches_used: keywordCount,
+      });
+    }
+
+    return new Response(
+      JSON.stringify({ results: filtered, usage: { used: currentUsage + keywordCount, limit: 1000 } }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (error: any) {
     console.error("Edge function error:", error);
     return new Response(JSON.stringify({ error: error.message }), {
