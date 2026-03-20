@@ -107,6 +107,7 @@ Deno.serve(async (req) => {
           // We paginate through up to 10 pages (100 results) to find domain
           let matchRank: number | null = null;
           let matchLink: string | null = null;
+          let apiError = false;
 
           for (let page = 1; page <= 10; page++) {
             const params = new URLSearchParams({
@@ -116,38 +117,73 @@ Deno.serve(async (req) => {
               gl,
             });
 
-            const response = await fetch(
-              `https://api.searlo.tech/api/v1/search/web?${params.toString()}`,
-              {
-                method: "GET",
-                headers: {
-                  "x-api-key": SEARLO_API_KEY,
-                },
+            const apiUrl = `https://api.searlo.tech/api/v1/search/web?${params.toString()}`;
+            
+            // Retry up to 2 times on failure
+            let response: Response | null = null;
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                response = await fetch(apiUrl, {
+                  method: "GET",
+                  headers: {
+                    "x-api-key": SEARLO_API_KEY,
+                  },
+                });
+                if (response.ok) break;
+                const errText = await response.text();
+                console.error(`Searlo API attempt ${attempt + 1} for "${keyword}" page ${page}: ${response.status} - ${errText.substring(0, 200)}`);
+                response = null;
+                // Wait before retry
+                if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
+              } catch (fetchErr) {
+                console.error(`Searlo fetch error attempt ${attempt + 1}:`, fetchErr);
+                if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
               }
-            );
+            }
 
-            if (!response.ok) {
-              console.error(`Searlo API error for "${keyword}" page ${page}: ${response.status}`);
+            if (!response || !response.ok) {
+              apiError = true;
               break;
             }
 
             const data = await response.json();
-            const items = data.items || [];
+            console.log(`Searlo response for "${keyword}" page ${page}:`, JSON.stringify({
+              organicCount: data.organic?.length,
+              nextPage: data.nextPage,
+              page: data.page,
+            }));
+            
+            // API returns "organic" array with "position" field
+            const organic = data.organic || [];
 
-            const found = items.find((item: any) =>
-              item.link?.toLowerCase().includes(cleanDomain)
-            );
-
-            if (found) {
-              matchRank = found.rank;
-              matchLink = found.link;
-              break;
+            // Match domain in result URLs or domain field
+            for (const item of organic) {
+              const itemDomain = (item.domain || "").toLowerCase();
+              const itemLink = (item.link || "").toLowerCase();
+              if (itemDomain.includes(cleanDomain) || itemLink.includes(cleanDomain)) {
+                matchRank = item.position;
+                matchLink = item.link;
+                break;
+              }
             }
+
+            if (matchRank) break;
 
             // Stop if no more pages
-            if (!data.searchInformation?.hasNextPage || items.length === 0) {
+            if (!data.nextPage || organic.length === 0) {
               break;
             }
+          }
+
+          if (apiError && !matchRank) {
+            return {
+              keyword,
+              position: "Error",
+              url: "API temporarily unavailable",
+              domain: cleanDomain,
+              location: location || "United States",
+              device: device || "desktop",
+            };
           }
 
           const result = {
