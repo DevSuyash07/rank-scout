@@ -3,12 +3,22 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+const LOCATION_TO_GL: Record<string, string> = {
+  "United States": "us",
+  "United Kingdom": "gb",
+  India: "in",
+  Canada: "ca",
+  Australia: "au",
+  Germany: "de",
+  France: "fr",
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
@@ -17,7 +27,6 @@ Deno.serve(async (req) => {
       throw new Error("SEARLO_API_KEY is not configured");
     }
 
-    // Extract user from JWT
     const authHeader = req.headers.get("authorization") || "";
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -53,7 +62,7 @@ Deno.serve(async (req) => {
     const keywordCount = keywords.filter((k: string) => k.trim()).length;
 
     // --- Usage limit check ---
-    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const currentMonth = new Date().toISOString().slice(0, 7);
 
     const { data: usageRow, error: usageError } = await supabase
       .from("user_usage")
@@ -86,50 +95,65 @@ Deno.serve(async (req) => {
       .toLowerCase()
       .trim();
 
+    const gl = LOCATION_TO_GL[location] || "us";
+
     const results = await Promise.all(
       keywords.map(async (kw: string) => {
         const keyword = kw.trim();
         if (!keyword) return null;
 
         try {
-          const params = new URLSearchParams({
-            q: keyword,
-            location: location || "United States",
-            device: device || "desktop",
-          });
+          // Searlo uses /search/web with x-api-key header
+          // We paginate through up to 10 pages (100 results) to find domain
+          let matchRank: number | null = null;
+          let matchLink: string | null = null;
 
-          const response = await fetch(
-            `https://api.searlo.tech/api/v1/search?${params.toString()}`,
-            {
-              headers: {
-                Authorization: `Bearer ${SEARLO_API_KEY}`,
-              },
+          for (let page = 1; page <= 10; page++) {
+            const params = new URLSearchParams({
+              q: keyword,
+              limit: "10",
+              page: String(page),
+              gl,
+            });
+
+            const response = await fetch(
+              `https://api.searlo.tech/api/v1/search/web?${params.toString()}`,
+              {
+                method: "GET",
+                headers: {
+                  "x-api-key": SEARLO_API_KEY,
+                },
+              }
+            );
+
+            if (!response.ok) {
+              console.error(`Searlo API error for "${keyword}" page ${page}: ${response.status}`);
+              break;
             }
-          );
 
-          if (!response.ok) {
-            console.error(`Searlo API error for "${keyword}": ${response.status}`);
-            return {
-              keyword,
-              position: "Error",
-              url: "API error",
-              domain: cleanDomain,
-              location: location || "United States",
-              device: device || "desktop",
-            };
+            const data = await response.json();
+            const items = data.items || [];
+
+            const found = items.find((item: any) =>
+              item.link?.toLowerCase().includes(cleanDomain)
+            );
+
+            if (found) {
+              matchRank = found.rank;
+              matchLink = found.link;
+              break;
+            }
+
+            // Stop if no more pages
+            if (!data.searchInformation?.hasNextPage || items.length === 0) {
+              break;
+            }
           }
-
-          const data = await response.json();
-          const organicResults = data.organic_results || [];
-
-          const match = organicResults.find((res: any) =>
-            res.link?.toLowerCase().includes(cleanDomain)
-          );
 
           const result = {
             keyword,
-            position: match ? String(match.position) : "100+",
-            url: match ? match.link : "Not Found",
+            position: matchRank ? String(matchRank) : "100+",
+            url: matchLink || "Not Found",
             domain: cleanDomain,
             location: location || "United States",
             device: device || "desktop",
