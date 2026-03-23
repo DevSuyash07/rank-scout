@@ -1,5 +1,9 @@
 project_id = "vecqofqqcpqcfoylpwaf"
 
+[auth]
+site_url = "https://id-preview--6a033354-8e66-477c-b873-3e5382edc183.lovable.app"
+additional_redirect_urls = ["https://id-preview--6a033354-8e66-477c-b873-3e5382edc183.lovable.app/**"]
+
 [functions.check-rank]
 verify_jwt = false
 
