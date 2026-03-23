@@ -29,7 +29,7 @@ export default function RegisterPage() {
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: window.location.origin },
@@ -37,6 +37,8 @@ export default function RegisterPage() {
 
     if (error) {
       setError(error.message);
+    } else if (data.user && data.user.identities && data.user.identities.length === 0) {
+      setError("An account with this email already exists. Please sign in instead.");
     } else {
       setSuccess(true);
     }
@@ -47,12 +49,12 @@ export default function RegisterPage() {
     return (
       <main className="min-h-screen bg-background flex items-center justify-center px-4">
         <div className="w-full max-w-sm bg-card rounded-[var(--radius)] shadow-card p-6 text-center space-y-3">
-          <h2 className="text-lg font-semibold text-foreground">Check your email</h2>
+          <h2 className="text-lg font-semibold text-foreground">Account created!</h2>
           <p className="text-sm text-muted-foreground">
-            We sent a verification link to <strong>{email}</strong>. Click it to activate your account.
+            Your account has been created successfully. You can now sign in.
           </p>
           <Link to="/login" className="inline-block text-sm text-foreground font-medium hover:underline mt-2">
-            Back to Login
+            Go to Login
           </Link>
         </div>
       </main>
