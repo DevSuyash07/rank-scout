@@ -29,7 +29,7 @@ export default function RegisterPage() {
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: window.location.origin },
@@ -37,6 +37,8 @@ export default function RegisterPage() {
 
     if (error) {
       setError(error.message);
+    } else if (data.user && data.user.identities && data.user.identities.length === 0) {
+      setError("An account with this email already exists. Please sign in instead.");
     } else {
       setSuccess(true);
     }
