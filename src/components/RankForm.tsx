@@ -19,7 +19,7 @@ const LOCATIONS = [
   "France",
 ];
 
-const MONTHLY_LIMIT = 1000;
+const MONTHLY_LIMIT = 250;
 
 export default function RankForm({ onResults, loading, setLoading }: RankFormProps) {
   const [formData, setFormData] = useState({

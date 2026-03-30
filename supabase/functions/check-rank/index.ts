@@ -254,7 +254,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ results: filtered, usage: { used: currentUsage + keywordCount, limit: 1000 } }),
+      JSON.stringify({ results: filtered, usage: { used: currentUsage + keywordCount, limit: userLimit } }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {
