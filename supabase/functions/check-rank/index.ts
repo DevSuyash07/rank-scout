@@ -75,11 +75,28 @@ Deno.serve(async (req) => {
 
     const currentUsage = usageRow?.searches_used ?? 0;
 
-    if (currentUsage + keywordCount > 1000) {
+    // Check user's custom credit limit (default 250)
+    const { data: userRoleData } = await supabase
+      .from("user_roles")
+      .select("credits_limit, is_blocked")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const userLimit = userRoleData?.credits_limit ?? 250;
+    const isBlocked = userRoleData?.is_blocked ?? false;
+
+    if (isBlocked) {
+      return new Response(
+        JSON.stringify({ error: "Your account has been blocked. Contact admin." }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (currentUsage + keywordCount > userLimit) {
       return new Response(
         JSON.stringify({
           error: "Monthly limit reached",
-          usage: { used: currentUsage, limit: 1000 },
+          usage: { used: currentUsage, limit: userLimit },
         }),
         {
           status: 429,
