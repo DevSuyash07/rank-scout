@@ -40,6 +40,15 @@ const Index = () => {
             <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[160px]">
               {user?.email}
             </span>
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className="flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors px-3 py-2 rounded-[var(--radius-inner)] hover:bg-primary/10"
+              >
+                <Shield className="h-4 w-4" />
+                Admin
+              </Link>
+            )}
             <Link
               to="/history"
               className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-[var(--radius-inner)] hover:bg-secondary"
