@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { History, LogOut } from "lucide-react";
+import { History, LogOut, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import RankForm from "@/components/RankForm";
 import ResultsTable from "@/components/ResultsTable";
 
@@ -9,6 +10,19 @@ const Index = () => {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const { user, signOut } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("role", "admin")
+        .maybeSingle()
+        .then(({ data }) => setIsAdmin(!!data));
+    }
+  }, [user]);
 
   return (
     <main className="min-h-screen bg-background py-16 px-4">
@@ -26,6 +40,15 @@ const Index = () => {
             <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[160px]">
               {user?.email}
             </span>
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className="flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors px-3 py-2 rounded-[var(--radius-inner)] hover:bg-primary/10"
+              >
+                <Shield className="h-4 w-4" />
+                Admin
+              </Link>
+            )}
             <Link
               to="/history"
               className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors px-3 py-2 rounded-[var(--radius-inner)] hover:bg-secondary"

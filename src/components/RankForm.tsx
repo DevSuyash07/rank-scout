@@ -19,7 +19,7 @@ const LOCATIONS = [
   "France",
 ];
 
-const MONTHLY_LIMIT = 1000;
+const MONTHLY_LIMIT = 250;
 
 export default function RankForm({ onResults, loading, setLoading }: RankFormProps) {
   const [formData, setFormData] = useState({
@@ -54,7 +54,15 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
         .eq("month", currentMonth)
         .maybeSingle();
 
-      setUsage({ used: data?.searches_used ?? 0, limit: MONTHLY_LIMIT });
+      // Fetch user's credit limit
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("credits_limit")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      const limit = roleData?.credits_limit ?? MONTHLY_LIMIT;
+      setUsage({ used: data?.searches_used ?? 0, limit });
     } catch {
       // silently fail
     }

@@ -9,3 +9,6 @@ verify_jwt = false
 
 [functions.ranking-history]
 verify_jwt = false
+
+[functions.admin-users]
+verify_jwt = false
