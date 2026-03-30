@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Loader2, Search, BarChart3 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Progress } from "@/components/ui/progress";
@@ -30,6 +30,12 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
   });
   const [error, setError] = useState("");
   const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null);
+  const [processingState, setProcessingState] = useState<{
+    current: number;
+    total: number;
+    currentKeyword: string;
+  } | null>(null);
+  const abortRef = useRef(false);
 
   useEffect(() => {
     fetchUsage();
@@ -54,10 +60,13 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
     }
   };
 
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
+    abortRef.current = false;
 
     const keywordArray = formData.keywords
       .split("\n")
@@ -91,40 +100,87 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
       }
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const collectedResults: any[] = [];
 
-      const res = await fetch(
-        `${supabaseUrl}/functions/v1/check-rank`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            ...formData,
-            keywords: keywordArray,
-          }),
+      // Clear previous results
+      onResults([]);
+
+      for (let i = 0; i < keywordArray.length; i++) {
+        if (abortRef.current) break;
+
+        const keyword = keywordArray[i];
+        setProcessingState({
+          current: i + 1,
+          total: keywordArray.length,
+          currentKeyword: keyword,
+        });
+
+        try {
+          const res = await fetch(
+            `${supabaseUrl}/functions/v1/check-rank`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({
+                ...formData,
+                keywords: [keyword],
+              }),
+            }
+          );
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            if (data.usage) setUsage(data.usage);
+            if (res.status === 429) {
+              setError(data.error || "Monthly limit reached");
+              break;
+            }
+            // Add error result for this keyword
+            collectedResults.push({
+              keyword,
+              position: "Error",
+              url: data.error || "Failed",
+            });
+          } else {
+            if (data.usage) setUsage(data.usage);
+            const newResults = data.results || data;
+            collectedResults.push(...newResults);
+          }
+
+          // Update results incrementally
+          onResults([...collectedResults]);
+
+          // Delay 3-5 seconds between keywords (skip after last)
+          if (i < keywordArray.length - 1 && !abortRef.current) {
+            const delayMs = 3000 + Math.random() * 2000;
+            await delay(delayMs);
+          }
+        } catch (err: any) {
+          collectedResults.push({
+            keyword,
+            position: "Error",
+            url: err.message || "Network error",
+          });
+          onResults([...collectedResults]);
         }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        if (data.usage) setUsage(data.usage);
-        throw new Error(data.error || "Failed to check rankings");
       }
-
-      if (data.usage) setUsage(data.usage);
-      onResults(data.results || data);
     } catch (err: any) {
       setError(err.message || "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
+      setProcessingState(null);
     }
   };
 
   const usagePercent = usage ? Math.min((usage.used / usage.limit) * 100, 100) : 0;
   const limitReached = usage ? usage.used >= usage.limit : false;
+  const progressPercent = processingState
+    ? (processingState.current / processingState.total) * 100
+    : 0;
 
   return (
     <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -146,6 +202,21 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
               You have reached your monthly limit. Usage resets next month.
             </p>
           )}
+        </div>
+      )}
+
+      {/* Processing progress */}
+      {processingState && (
+        <div className="md:col-span-2 flex flex-col gap-2 p-4 rounded-[var(--radius-inner)] bg-info/5 ring-1 ring-info/20">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground font-medium">
+              Processing: <span className="text-foreground font-semibold">"{processingState.currentKeyword}"</span>
+            </span>
+            <span className="text-muted-foreground tabular-nums">
+              {processingState.current} / {processingState.total}
+            </span>
+          </div>
+          <Progress value={progressPercent} className="h-2" />
         </div>
       )}
 
