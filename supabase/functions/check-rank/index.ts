@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
       .eq("user_id", user.id)
       .maybeSingle();
 
-    const userLimit = userRoleData?.credits_limit ?? 250;
+    const userLimit = userRoleData?.credits_limit ?? 10;
     const isBlocked = userRoleData?.is_blocked ?? false;
 
     if (isBlocked) {
