@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2, Shield, Ban, CheckCircle, Save } from "lucide-react";
+import { ArrowLeft, Loader2, Shield, Ban, CheckCircle, Save, Pencil, X, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Progress } from "@/components/ui/progress";
+import { toast } from "sonner";
 
 interface AdminUser {
   id: string;
@@ -22,6 +23,10 @@ export default function AdminPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [editCredits, setEditCredits] = useState<Record<string, string>>({});
+  const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [editEmail, setEditEmail] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -56,7 +61,7 @@ export default function AdminPage() {
     }
   };
 
-  const updateUser = async (userId: string, updates: { credits_limit?: number; is_blocked?: boolean }) => {
+  const updateUser = async (userId: string, updates: { credits_limit?: number; is_blocked?: boolean; email?: string; password?: string }) => {
     setSaving(userId);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -71,14 +76,18 @@ export default function AdminPage() {
         },
         body: JSON.stringify({ user_id: userId, ...updates }),
       });
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
-        setError(data.error || "Update failed");
+        toast.error(data.error || "Update failed");
         return;
       }
+      toast.success("User updated successfully");
+      setEditingUser(null);
+      setEditEmail("");
+      setEditPassword("");
       await fetchUsers();
     } catch (err: any) {
-      setError(err.message);
+      toast.error(err.message);
     } finally {
       setSaving(null);
     }
@@ -92,6 +101,25 @@ export default function AdminPage() {
     const val = parseInt(editCredits[userId]);
     if (isNaN(val) || val < 0) return;
     updateUser(userId, { credits_limit: val });
+  };
+
+  const startEditing = (u: AdminUser) => {
+    setEditingUser(u.id);
+    setEditEmail(u.email);
+    setEditPassword("");
+    setShowPassword(false);
+  };
+
+  const saveUserDetails = (userId: string) => {
+    const updates: any = {};
+    const currentUser = users.find(u => u.id === userId);
+    if (editEmail && editEmail !== currentUser?.email) updates.email = editEmail;
+    if (editPassword.trim()) updates.password = editPassword;
+    if (Object.keys(updates).length === 0) {
+      setEditingUser(null);
+      return;
+    }
+    updateUser(userId, updates);
   };
 
   return (
@@ -159,11 +187,40 @@ export default function AdminPage() {
                 </thead>
                 <tbody className="divide-y divide-border/50">
                   {users.map((u) => {
-                    const usagePercent = Math.min((u.searches_used / u.credits_limit) * 100, 100);
+                    const usagePercent = u.credits_limit > 0 ? Math.min((u.searches_used / u.credits_limit) * 100, 100) : 0;
+                    const isEditing = editingUser === u.id;
                     return (
                       <tr key={u.id} className="hover:bg-secondary/40 transition-colors duration-150">
                         <td className="px-5 py-3 text-sm font-medium text-foreground">
-                          {u.email}
+                          {isEditing ? (
+                            <div className="space-y-2">
+                              <input
+                                type="email"
+                                className="w-full p-1.5 rounded-[var(--radius-inner)] bg-secondary/50 ring-1 ring-border text-sm"
+                                value={editEmail}
+                                onChange={(e) => setEditEmail(e.target.value)}
+                                placeholder="Email"
+                              />
+                              <div className="relative">
+                                <input
+                                  type={showPassword ? "text" : "password"}
+                                  className="w-full p-1.5 pr-8 rounded-[var(--radius-inner)] bg-secondary/50 ring-1 ring-border text-sm"
+                                  value={editPassword}
+                                  onChange={(e) => setEditPassword(e.target.value)}
+                                  placeholder="New password (optional)"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowPassword(!showPassword)}
+                                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                                >
+                                  {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            u.email
+                          )}
                         </td>
                         <td className="px-5 py-3">
                           <span className={`text-[10px] uppercase tracking-widest px-2 py-1 rounded-full font-bold ${
@@ -207,7 +264,7 @@ export default function AdminPage() {
                         </td>
                         <td className="px-5 py-3">
                           <span className={`text-[10px] uppercase tracking-widest px-2 py-1 rounded-full font-bold ${
-                            u.is_blocked ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"
+                            u.is_blocked ? "bg-destructive/10 text-destructive" : "bg-green-500/10 text-green-600"
                           }`}>
                             {u.is_blocked ? "Blocked" : "Active"}
                           </span>
@@ -220,29 +277,60 @@ export default function AdminPage() {
                           })}
                         </td>
                         <td className="px-5 py-3">
-                          {u.role !== "admin" && (
-                            <button
-                              onClick={() => toggleBlock(u)}
-                              disabled={saving === u.id}
-                              className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[var(--radius-inner)] transition-colors ${
-                                u.is_blocked
-                                  ? "text-success hover:bg-success/10"
-                                  : "text-destructive hover:bg-destructive/10"
-                              }`}
-                            >
-                              {u.is_blocked ? (
-                                <>
-                                  <CheckCircle className="h-3.5 w-3.5" />
-                                  Unblock
-                                </>
-                              ) : (
-                                <>
-                                  <Ban className="h-3.5 w-3.5" />
-                                  Block
-                                </>
-                              )}
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  onClick={() => saveUserDetails(u.id)}
+                                  disabled={saving === u.id}
+                                  className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-inner)] text-primary hover:bg-primary/10 transition-colors"
+                                >
+                                  {saving === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => { setEditingUser(null); setEditPassword(""); }}
+                                  className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-inner)] text-muted-foreground hover:bg-secondary transition-colors"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => startEditing(u)}
+                                  className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-inner)] text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                                  title="Edit user"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  Edit
+                                </button>
+                                {u.role !== "admin" && (
+                                  <button
+                                    onClick={() => toggleBlock(u)}
+                                    disabled={saving === u.id}
+                                    className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-[var(--radius-inner)] transition-colors ${
+                                      u.is_blocked
+                                        ? "text-green-600 hover:bg-green-500/10"
+                                        : "text-destructive hover:bg-destructive/10"
+                                    }`}
+                                  >
+                                    {u.is_blocked ? (
+                                      <>
+                                        <CheckCircle className="h-3.5 w-3.5" />
+                                        Unblock
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Ban className="h-3.5 w-3.5" />
+                                        Block
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

@@ -27,7 +27,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Use service role for admin operations
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -48,11 +47,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const url = new URL(req.url);
     const method = req.method;
 
     if (method === "GET") {
-      // List all users with roles and usage
       const currentMonth = new Date().toISOString().slice(0, 7);
 
       const { data: { users: authUsers }, error: listError } = await supabase.auth.admin.listUsers();
@@ -72,7 +69,7 @@ Deno.serve(async (req) => {
           email: u.email,
           created_at: u.created_at,
           role: role?.role || "user",
-          credits_limit: role?.credits_limit ?? 250,
+          credits_limit: role?.credits_limit ?? 10,
           is_blocked: role?.is_blocked ?? false,
           searches_used: usage?.searches_used ?? 0,
         };
@@ -84,33 +81,44 @@ Deno.serve(async (req) => {
     }
 
     if (method === "PATCH") {
-      const { user_id, credits_limit, is_blocked } = await req.json();
+      const { user_id, credits_limit, is_blocked, email, password } = await req.json();
       if (!user_id) throw new Error("user_id required");
 
-      const updateData: any = {};
-      if (credits_limit !== undefined) updateData.credits_limit = credits_limit;
-      if (is_blocked !== undefined) updateData.is_blocked = is_blocked;
+      // Update auth user (email/password) if provided
+      const authUpdates: any = {};
+      if (email !== undefined && email.trim()) authUpdates.email = email.trim();
+      if (password !== undefined && password.trim()) authUpdates.password = password.trim();
 
-      // Upsert role row
-      const { data: existing } = await supabase
-        .from("user_roles")
-        .select("id")
-        .eq("user_id", user_id)
-        .eq("role", "user")
-        .maybeSingle();
+      if (Object.keys(authUpdates).length > 0) {
+        const { error: authError } = await supabase.auth.admin.updateUserById(user_id, authUpdates);
+        if (authError) throw authError;
+      }
 
-      if (existing) {
-        await supabase
+      // Update role/credits/block status if provided
+      const roleUpdates: any = {};
+      if (credits_limit !== undefined) roleUpdates.credits_limit = credits_limit;
+      if (is_blocked !== undefined) roleUpdates.is_blocked = is_blocked;
+
+      if (Object.keys(roleUpdates).length > 0) {
+        const { data: existing } = await supabase
           .from("user_roles")
-          .update(updateData)
-          .eq("id", existing.id);
-      } else {
-        await supabase.from("user_roles").insert({
-          user_id,
-          role: "user",
-          credits_limit: credits_limit ?? 250,
-          is_blocked: is_blocked ?? false,
-        });
+          .select("id")
+          .eq("user_id", user_id)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase
+            .from("user_roles")
+            .update(roleUpdates)
+            .eq("id", existing.id);
+        } else {
+          await supabase.from("user_roles").insert({
+            user_id,
+            role: "user",
+            credits_limit: credits_limit ?? 10,
+            is_blocked: is_blocked ?? false,
+          });
+        }
       }
 
       return new Response(JSON.stringify({ success: true }), {
