@@ -39,13 +39,11 @@ export default function AdminPage() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const res = await fetch(`${supabaseUrl}/functions/v1/admin-users`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+      const { data, error: fnError } = await supabase.functions.invoke("admin-users", {
+        method: "GET",
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Failed to load users");
+      if (fnError) {
+        setError(fnError.message || "Failed to load users");
         return;
       }
       setUsers(data);
