@@ -99,7 +99,10 @@ export default function AdminPage() {
 
   const saveCredits = (userId: string) => {
     const val = parseInt(editCredits[userId]);
-    if (isNaN(val) || val < 0) return;
+    if (isNaN(val) || val < 0) {
+      toast.error("Please enter a valid credit value");
+      return;
+    }
     updateUser(userId, { credits_limit: val });
   };
 
