@@ -99,7 +99,10 @@ export default function AdminPage() {
 
   const saveCredits = (userId: string) => {
     const val = parseInt(editCredits[userId]);
-    if (isNaN(val) || val < 0) return;
+    if (isNaN(val) || val < 0) {
+      toast.error("Please enter a valid credit value");
+      return;
+    }
     updateUser(userId, { credits_limit: val });
   };
 
@@ -247,11 +250,15 @@ export default function AdminPage() {
                               onChange={(e) =>
                                 setEditCredits({ ...editCredits, [u.id]: e.target.value })
                               }
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveCredits(u.id);
+                              }}
                             />
                             <button
-                              onClick={() => saveCredits(u.id)}
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); e.stopPropagation(); saveCredits(u.id); }}
                               disabled={saving === u.id}
-                              className="p-1.5 rounded-[var(--radius-inner)] hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                              className="flex items-center gap-1 px-2 py-1.5 rounded-[var(--radius-inner)] bg-primary/10 text-primary hover:bg-primary/20 text-xs font-medium transition-colors"
                               title="Save credits"
                             >
                               {saving === u.id ? (
@@ -259,6 +266,7 @@ export default function AdminPage() {
                               ) : (
                                 <Save className="h-3.5 w-3.5" />
                               )}
+                              Save
                             </button>
                           </div>
                         </td>
