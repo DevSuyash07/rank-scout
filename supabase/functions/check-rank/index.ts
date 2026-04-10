@@ -8,7 +8,7 @@ const corsHeaders = {
 
 const LOCATION_TO_GL: Record<string, string> = {
   "United States": "us",
-  "United Kingdom": "gb",
+  "United Kingdom": "uk",
   India: "in",
   Canada: "ca",
   Australia: "au",
@@ -22,9 +22,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const SEARLO_API_KEY = Deno.env.get("SEARLO_API_KEY");
-    if (!SEARLO_API_KEY) {
-      throw new Error("SEARLO_API_KEY is not configured");
+    const SERPER_API_KEY = Deno.env.get("SERPER_API_KEY");
+    if (!SERPER_API_KEY) {
+      throw new Error("SERPER_API_KEY is not configured");
     }
 
     const authHeader = req.headers.get("authorization") || "";
@@ -75,7 +75,6 @@ Deno.serve(async (req) => {
 
     const currentUsage = usageRow?.searches_used ?? 0;
 
-    // Check user's custom credit limit (default 250)
     const { data: userRoleData } = await supabase
       .from("user_roles")
       .select("credits_limit, is_blocked")
@@ -120,79 +119,25 @@ Deno.serve(async (req) => {
         if (!keyword) return null;
 
         try {
-          // Searlo uses /search/web with x-api-key header
-          // We paginate through up to 10 pages (100 results) to find domain
-          let matchRank: number | null = null;
-          let matchLink: string | null = null;
-          let apiError = false;
-
-          for (let page = 1; page <= 10; page++) {
-            const params = new URLSearchParams({
+          // Serper API - POST to https://google.serper.dev/search
+          // Returns up to 100 results with num parameter
+          const response = await fetch("https://google.serper.dev/search", {
+            method: "POST",
+            headers: {
+              "X-API-KEY": SERPER_API_KEY,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
               q: keyword,
-              limit: "10",
-              page: String(page),
               gl,
-            });
+              num: 100,
+              ...(device === "mobile" ? { device: "mobile" } : {}),
+            }),
+          });
 
-            const apiUrl = `https://api.searlo.tech/api/v1/search/web?${params.toString()}`;
-            
-            // Retry up to 2 times on failure
-            let response: Response | null = null;
-            for (let attempt = 0; attempt < 2; attempt++) {
-              try {
-                response = await fetch(apiUrl, {
-                  method: "GET",
-                  headers: {
-                    "x-api-key": SEARLO_API_KEY,
-                  },
-                });
-                if (response.ok) break;
-                const errText = await response.text();
-                console.error(`Searlo API attempt ${attempt + 1} for "${keyword}" page ${page}: ${response.status} - ${errText.substring(0, 200)}`);
-                response = null;
-                // Wait before retry
-                if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
-              } catch (fetchErr) {
-                console.error(`Searlo fetch error attempt ${attempt + 1}:`, fetchErr);
-                if (attempt === 0) await new Promise(r => setTimeout(r, 1000));
-              }
-            }
-
-            if (!response || !response.ok) {
-              apiError = true;
-              break;
-            }
-
-            const data = await response.json();
-            console.log(`Searlo response for "${keyword}" page ${page}:`, JSON.stringify({
-              organicCount: data.organic?.length,
-              nextPage: data.nextPage,
-              page: data.page,
-            }));
-            
-            // API returns "organic" array with "position" field
-            const organic = data.organic || [];
-
-            // Match domain in result URLs or domain field
-            for (const item of organic) {
-              const itemDomain = (item.domain || "").toLowerCase();
-              const itemLink = (item.link || "").toLowerCase();
-              if (itemDomain.includes(cleanDomain) || itemLink.includes(cleanDomain)) {
-                matchRank = item.position;
-                matchLink = item.link;
-                break;
-              }
-            }
-
-            if (matchRank) break;
-
-            // Stop if no more pages
-            if (!data.nextPage || organic.length === 0) {
-              break;
-            }
-          }
-
-          if (apiError && !matchRank) {
+          if (!response.ok) {
+            const errText = await response.text();
+            console.error(`Serper API error for "${keyword}": ${response.status} - ${errText.substring(0, 200)}`);
             return {
               keyword,
               position: "Error",
@@ -201,6 +146,23 @@ Deno.serve(async (req) => {
               location: location || "United States",
               device: device || "desktop",
             };
+          }
+
+          const data = await response.json();
+          console.log(`Serper response for "${keyword}": organic count = ${data.organic?.length ?? 0}`);
+
+          let matchRank: number | null = null;
+          let matchLink: string | null = null;
+
+          const organic = data.organic || [];
+          for (let i = 0; i < organic.length; i++) {
+            const item = organic[i];
+            const itemLink = (item.link || "").toLowerCase();
+            if (itemLink.includes(cleanDomain)) {
+              matchRank = item.position || (i + 1);
+              matchLink = item.link;
+              break;
+            }
           }
 
           const result = {
