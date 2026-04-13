@@ -113,65 +113,56 @@ Deno.serve(async (req) => {
 
     const locationInfo = LOCATION_MAP[location] || LOCATION_MAP["United States"];
 
-    const results = await Promise.all(
-      keywords.map(async (kw: string) => {
-        const keyword = kw.trim();
-        if (!keyword) return null;
+    // Build all keyword tasks into a single DataForSEO batch request
+    const validKeywords = keywords.map((k: string) => k.trim()).filter(Boolean);
+    const postData = validKeywords.map((keyword: string) => ({
+      keyword,
+      location_code: locationInfo.code,
+      language_code: "en",
+      device: device === "mobile" ? "mobile" : "desktop",
+      os: device === "mobile" ? "android" : "windows",
+      depth: 100,
+    }));
 
-        try {
-          // DataForSEO SERP API - Live/Regular endpoint
-          const postData = [
-            {
-              keyword,
-              location_code: locationInfo.code,
-              language_code: "en",
-              device: device === "mobile" ? "mobile" : "desktop",
-              os: device === "mobile" ? "android" : "windows",
-              depth: 100,
-            },
-          ];
+    let results: any[] = [];
 
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 55000);
+    try {
+      console.log(`Sending ${postData.length} keywords to DataForSEO...`);
+      const response = await fetch(
+        "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${DATAFORSEO_AUTH}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(postData),
+        }
+      );
 
-          const response = await fetch(
-            "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Basic ${DATAFORSEO_AUTH}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(postData),
-              signal: controller.signal,
-            }
-          );
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`DataForSEO API error: ${response.status} - ${errText.substring(0, 300)}`);
+        results = validKeywords.map((keyword: string) => ({
+          keyword,
+          position: "Error",
+          url: "API temporarily unavailable",
+          domain: cleanDomain,
+          location: location || "United States",
+          device: device || "desktop",
+        }));
+      } else {
+        const data = await response.json();
+        console.log(`DataForSEO response: status_code=${data.status_code}, tasks=${data.tasks?.length}`);
 
-          clearTimeout(timeoutId);
-
-          if (!response.ok) {
-            const errText = await response.text();
-            console.error(`DataForSEO API error for "${keyword}": ${response.status} - ${errText.substring(0, 300)}`);
-            return {
-              keyword,
-              position: "Error",
-              url: "API temporarily unavailable",
-              domain: cleanDomain,
-              location: location || "United States",
-              device: device || "desktop",
-            };
-          }
-
-          const data = await response.json();
-          console.log(`DataForSEO response for "${keyword}": status_code = ${data.status_code}`);
-
+        const tasks = data.tasks || [];
+        results = tasks.map((task: any, idx: number) => {
+          const kw = validKeywords[idx] || `keyword_${idx}`;
           let matchRank: number | null = null;
           let matchLink: string | null = null;
 
-          // Navigate the DataForSEO response structure
-          const tasks = data.tasks || [];
-          if (tasks.length > 0 && tasks[0].result && tasks[0].result.length > 0) {
-            const items = tasks[0].result[0].items || [];
+          if (task.status_code === 20000 && task.result && task.result.length > 0) {
+            const items = task.result[0].items || [];
             for (const item of items) {
               if (item.type !== "organic") continue;
               const itemUrl = (item.url || "").toLowerCase();
@@ -182,43 +173,44 @@ Deno.serve(async (req) => {
                 break;
               }
             }
-          } else if (tasks.length > 0 && tasks[0].status_message) {
-            console.error(`DataForSEO task error for "${keyword}": ${tasks[0].status_message}`);
+          } else {
+            console.error(`Task error for "${kw}": ${task.status_message}`);
           }
 
-          const result = {
-            keyword,
+          return {
+            keyword: kw,
             position: matchRank ? String(matchRank) : "100+",
             url: matchLink || "Not Found",
             domain: cleanDomain,
             location: location || "United States",
             device: device || "desktop",
           };
+        });
+      }
+    } catch (err) {
+      console.error("DataForSEO batch request failed:", err);
+      results = validKeywords.map((keyword: string) => ({
+        keyword,
+        position: "Error",
+        url: "Processing error",
+        domain: cleanDomain,
+        location: location || "United States",
+        device: device || "desktop",
+      }));
+    }
 
-          await supabase.from("rankings").insert({
-            keyword: result.keyword,
-            domain: result.domain,
-            location: result.location,
-            device: result.device,
-            position: result.position,
-            url: result.url,
-            user_id: user.id,
-          });
-
-          return result;
-        } catch (err) {
-          console.error(`Error processing keyword "${keyword}":`, err);
-          return {
-            keyword,
-            position: "Error",
-            url: "Processing error",
-            domain: cleanDomain,
-            location: location || "United States",
-            device: device || "desktop",
-          };
-        }
-      })
-    );
+    // Save all results to DB
+    for (const result of results) {
+      await supabase.from("rankings").insert({
+        keyword: result.keyword,
+        domain: result.domain,
+        location: result.location,
+        device: result.device,
+        position: result.position,
+        url: result.url,
+        user_id: user.id,
+      });
+    }
 
     const filtered = results.filter(Boolean);
 
