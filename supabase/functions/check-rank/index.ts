@@ -131,34 +131,23 @@ Deno.serve(async (req) => {
             },
           ];
 
-          const body = JSON.stringify(postData);
-          const fetchOptions = {
-            method: "POST",
-            headers: {
-              Authorization: `Basic ${DATAFORSEO_AUTH}`,
-              "Content-Type": "application/json",
-            },
-            body,
-          };
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 55000);
 
-          // Retry up to 3 times on connection errors
-          let response: Response | null = null;
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              response = await fetch(
-                "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
-                fetchOptions
-              );
-              break;
-            } catch (fetchErr) {
-              console.error(`Attempt ${attempt + 1} failed for "${keyword}":`, fetchErr);
-              if (attempt < 2) {
-                await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-              } else {
-                throw fetchErr;
-              }
+          const response = await fetch(
+            "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Basic ${DATAFORSEO_AUTH}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(postData),
+              signal: controller.signal,
             }
-          }
+          );
+
+          clearTimeout(timeoutId);
 
           if (!response || !response.ok) {
             const errText = await response.text();
