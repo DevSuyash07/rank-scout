@@ -6,14 +6,14 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const LOCATION_TO_GL: Record<string, string> = {
-  "United States": "us",
-  "United Kingdom": "uk",
-  India: "in",
-  Canada: "ca",
-  Australia: "au",
-  Germany: "de",
-  France: "fr",
+const LOCATION_MAP: Record<string, { code: number; name: string }> = {
+  "United States": { code: 2840, name: "United States" },
+  "United Kingdom": { code: 2826, name: "United Kingdom" },
+  India: { code: 2356, name: "India" },
+  Canada: { code: 2124, name: "Canada" },
+  Australia: { code: 2036, name: "Australia" },
+  Germany: { code: 2276, name: "Germany" },
+  France: { code: 2250, name: "France" },
 };
 
 Deno.serve(async (req) => {
@@ -22,9 +22,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const SERPER_API_KEY = Deno.env.get("SERPER_API_KEY");
-    if (!SERPER_API_KEY) {
-      throw new Error("SERPER_API_KEY is not configured");
+    const DATAFORSEO_AUTH = Deno.env.get("DATAFORSEO_AUTH");
+    if (!DATAFORSEO_AUTH) {
+      throw new Error("DATAFORSEO_AUTH is not configured");
     }
 
     const authHeader = req.headers.get("authorization") || "";
@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
       .toLowerCase()
       .trim();
 
-    const gl = LOCATION_TO_GL[location] || "us";
+    const locationInfo = LOCATION_MAP[location] || LOCATION_MAP["United States"];
 
     const results = await Promise.all(
       keywords.map(async (kw: string) => {
@@ -119,25 +119,33 @@ Deno.serve(async (req) => {
         if (!keyword) return null;
 
         try {
-          // Serper API - POST to https://google.serper.dev/search
-          // Returns up to 100 results with num parameter
-          const response = await fetch("https://google.serper.dev/search", {
-            method: "POST",
-            headers: {
-              "X-API-KEY": SERPER_API_KEY,
-              "Content-Type": "application/json",
+          // DataForSEO SERP API - Live/Regular endpoint
+          const postData = [
+            {
+              keyword,
+              location_code: locationInfo.code,
+              language_code: "en",
+              device: device === "mobile" ? "mobile" : "desktop",
+              os: device === "mobile" ? "android" : "windows",
+              depth: 100,
             },
-            body: JSON.stringify({
-              q: keyword,
-              gl,
-              num: 100,
-              ...(device === "mobile" ? { device: "mobile" } : {}),
-            }),
-          });
+          ];
+
+          const response = await fetch(
+            "https://api.dataforseo.com/v3/serp/google/organic/live/regular",
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Basic ${DATAFORSEO_AUTH}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(postData),
+            }
+          );
 
           if (!response.ok) {
             const errText = await response.text();
-            console.error(`Serper API error for "${keyword}": ${response.status} - ${errText.substring(0, 200)}`);
+            console.error(`DataForSEO API error for "${keyword}": ${response.status} - ${errText.substring(0, 300)}`);
             return {
               keyword,
               position: "Error",
@@ -149,20 +157,27 @@ Deno.serve(async (req) => {
           }
 
           const data = await response.json();
-          console.log(`Serper response for "${keyword}": organic count = ${data.organic?.length ?? 0}`);
+          console.log(`DataForSEO response for "${keyword}": status_code = ${data.status_code}`);
 
           let matchRank: number | null = null;
           let matchLink: string | null = null;
 
-          const organic = data.organic || [];
-          for (let i = 0; i < organic.length; i++) {
-            const item = organic[i];
-            const itemLink = (item.link || "").toLowerCase();
-            if (itemLink.includes(cleanDomain)) {
-              matchRank = item.position || (i + 1);
-              matchLink = item.link;
-              break;
+          // Navigate the DataForSEO response structure
+          const tasks = data.tasks || [];
+          if (tasks.length > 0 && tasks[0].result && tasks[0].result.length > 0) {
+            const items = tasks[0].result[0].items || [];
+            for (const item of items) {
+              if (item.type !== "organic") continue;
+              const itemUrl = (item.url || "").toLowerCase();
+              const itemDomain = (item.domain || "").toLowerCase();
+              if (itemUrl.includes(cleanDomain) || itemDomain.includes(cleanDomain)) {
+                matchRank = item.rank_absolute || item.rank_group;
+                matchLink = item.url;
+                break;
+              }
             }
+          } else if (tasks.length > 0 && tasks[0].status_message) {
+            console.error(`DataForSEO task error for "${keyword}": ${tasks[0].status_message}`);
           }
 
           const result = {
