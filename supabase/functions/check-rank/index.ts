@@ -160,7 +160,7 @@ Deno.serve(async (req) => {
             }
           }
 
-          if (!response.ok) {
+          if (!response || !response.ok) {
             const errText = await response.text();
             console.error(`DataForSEO API error for "${keyword}": ${response.status} - ${errText.substring(0, 300)}`);
             return {
