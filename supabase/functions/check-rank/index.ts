@@ -16,23 +16,6 @@ const LOCATION_MAP: Record<string, { code: number; name: string }> = {
   France: { code: 2250, name: "France" },
 };
 
-async function dataforseoFetch(url: string, auth: string, method = "GET", body?: string) {
-  const opts: RequestInit = {
-    method,
-    headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/json",
-    },
-  };
-  if (body) opts.body = body;
-  const res = await fetch(url, opts);
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`DataForSEO ${res.status}: ${text.substring(0, 300)}`);
-  }
-  return res.json();
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -76,7 +59,8 @@ Deno.serve(async (req) => {
       throw new Error("Maximum 50 keywords per request");
     }
 
-    const keywordCount = keywords.filter((k: string) => k.trim()).length;
+    const validKeywords = keywords.map((k: string) => k.trim()).filter(Boolean);
+    const keywordCount = validKeywords.length;
 
     // --- Usage limit check ---
     const currentMonth = new Date().toISOString().slice(0, 7);
@@ -114,10 +98,7 @@ Deno.serve(async (req) => {
           error: "Monthly limit reached",
           usage: { used: currentUsage, limit: userLimit },
         }),
-        {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -129,103 +110,58 @@ Deno.serve(async (req) => {
       .trim();
 
     const locationInfo = LOCATION_MAP[location] || LOCATION_MAP["United States"];
-    const validKeywords = keywords.map((k: string) => k.trim()).filter(Boolean);
 
-    // Step 1: Post tasks to DataForSEO (returns immediately)
-    const postData = validKeywords.map((keyword: string, idx: number) => ({
-      keyword,
-      location_code: locationInfo.code,
-      language_code: "en",
-      device: device === "mobile" ? "mobile" : "desktop",
-      os: device === "mobile" ? "android" : "windows",
-      depth: 100,
-      tag: `kw_${idx}`,
-    }));
+    // Use Live endpoint - returns results in a single request
+    const results = [];
 
-    console.log(`Posting ${postData.length} tasks to DataForSEO...`);
-    const postResult = await dataforseoFetch(
-      "https://api.dataforseo.com/v3/serp/google/organic/task_post",
-      DATAFORSEO_AUTH,
-      "POST",
-      JSON.stringify(postData)
-    );
+    for (const keyword of validKeywords) {
+      const livePayload = [
+        {
+          keyword,
+          location_code: locationInfo.code,
+          language_code: "en",
+          device: device === "mobile" ? "mobile" : "desktop",
+          os: device === "mobile" ? "android" : "windows",
+          depth: 100,
+        },
+      ];
 
-    const taskIds: string[] = [];
-    for (const task of postResult.tasks || []) {
-      if (task.status_code === 20100 && task.id) {
-        taskIds.push(task.id);
-      } else {
-        console.error(`Task post failed: ${task.status_message}`);
+      console.log(`Fetching live results for: "${keyword}"...`);
+
+      const res = await fetch(
+        "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${DATAFORSEO_AUTH}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(livePayload),
+        }
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`DataForSEO error for "${keyword}": ${res.status} ${text.substring(0, 300)}`);
+        results.push({
+          keyword,
+          position: "Error",
+          url: "API Error",
+          domain: cleanDomain,
+          location: location || "United States",
+          device: device || "desktop",
+        });
+        continue;
       }
-    }
 
-    console.log(`Posted ${taskIds.length} tasks. Polling for results...`);
+      const data = await res.json();
 
-    // Step 2: Poll tasks_ready then fetch results
-    const maxPolls = 20;
-    const pollInterval = 3000; // 3 seconds
-    const completedResults: Map<string, any> = new Map();
-    const pendingIds = new Set(taskIds);
-
-    for (let poll = 0; poll < maxPolls && pendingIds.size > 0; poll++) {
-      await new Promise((r) => setTimeout(r, pollInterval));
-
-      try {
-        const readyData = await dataforseoFetch(
-          "https://api.dataforseo.com/v3/serp/google/organic/tasks_ready",
-          DATAFORSEO_AUTH
-        );
-
-        const readyIds = new Set<string>();
-        for (const task of readyData.tasks || []) {
-          for (const result of task.result || []) {
-            if (pendingIds.has(result.id)) {
-              readyIds.add(result.id);
-            }
-          }
-        }
-
-        if (readyIds.size === 0) {
-          console.log(`Poll ${poll + 1}: no tasks ready yet...`);
-          continue;
-        }
-
-        console.log(`Poll ${poll + 1}: ${readyIds.size} tasks ready, fetching...`);
-
-        // Fetch results for ready tasks
-        for (const taskId of readyIds) {
-          try {
-            const taskResult = await dataforseoFetch(
-              `https://api.dataforseo.com/v3/serp/google/organic/task_get/regular/${taskId}`,
-              DATAFORSEO_AUTH
-            );
-
-            for (const task of taskResult.tasks || []) {
-              if (task.status_code === 20000 && task.result && task.result.length > 0) {
-                const resultData = task.result[0];
-                const kw = resultData.keyword;
-                completedResults.set(taskId, { keyword: kw, items: resultData.items || [] });
-              }
-            }
-            pendingIds.delete(taskId);
-          } catch (err) {
-            console.error(`Error fetching task ${taskId}:`, err);
-          }
-        }
-      } catch (err) {
-        console.error(`Poll ${poll + 1} error:`, err);
-      }
-    }
-
-    // Step 3: Build results
-    const results = validKeywords.map((keyword: string, idx: number) => {
-      // Find the matching completed result
       let matchRank: number | null = null;
       let matchLink: string | null = null;
 
-      for (const [, completed] of completedResults) {
-        if (completed.keyword === keyword) {
-          for (const item of completed.items) {
+      for (const task of data.tasks || []) {
+        if (task.status_code === 20000 && task.result?.length > 0) {
+          for (const item of task.result[0].items || []) {
             if (item.type !== "organic") continue;
             const itemUrl = (item.url || "").toLowerCase();
             const itemDomain = (item.domain || "").toLowerCase();
@@ -235,19 +171,18 @@ Deno.serve(async (req) => {
               break;
             }
           }
-          break;
         }
       }
 
-      return {
+      results.push({
         keyword,
         position: matchRank ? String(matchRank) : "100+",
         url: matchLink || "Not Found",
         domain: cleanDomain,
         location: location || "United States",
         device: device || "desktop",
-      };
-    });
+      });
+    }
 
     // Save all results to DB
     for (const result of results) {
