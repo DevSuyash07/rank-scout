@@ -119,17 +119,39 @@ Deno.serve(async (req) => {
 
       console.log(`Fetching live results for: "${keyword}" (location_code: ${resolvedLocationCode})...`);
 
-      const res = await fetch(
-        "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Basic ${DATAFORSEO_AUTH}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(livePayload),
-        }
-      );
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 45000);
+
+      let res: Response;
+      try {
+        res = await fetch(
+          "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Basic ${DATAFORSEO_AUTH}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(livePayload),
+            signal: controller.signal,
+          }
+        );
+      } catch (fetchErr: any) {
+        clearTimeout(timeout);
+        console.error(`Fetch failed for "${keyword}": ${fetchErr.message}`);
+        results.push({
+          keyword,
+          position: "Error",
+          url: "Timeout or network error",
+          domain: cleanDomain,
+          location: locationLabel,
+          device: device || "desktop",
+        });
+        continue;
+      }
+      clearTimeout(timeout);
+
+      console.log(`DataForSEO response status for "${keyword}": ${res.status}`);
 
       if (!res.ok) {
         const text = await res.text();
