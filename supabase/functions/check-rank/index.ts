@@ -6,16 +6,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const LOCATION_MAP: Record<string, { code: number; name: string }> = {
-  "United States": { code: 2840, name: "United States" },
-  "United Kingdom": { code: 2826, name: "United Kingdom" },
-  India: { code: 2356, name: "India" },
-  Canada: { code: 2124, name: "Canada" },
-  Australia: { code: 2036, name: "Australia" },
-  Germany: { code: 2276, name: "Germany" },
-  France: { code: 2250, name: "France" },
-};
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -47,7 +37,7 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { keywords, domain, location, device } = await req.json();
+    const { keywords, domain, location_code, location, device } = await req.json();
 
     if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
       throw new Error("Keywords array is required");
@@ -109,16 +99,17 @@ Deno.serve(async (req) => {
       .toLowerCase()
       .trim();
 
-    const locationInfo = LOCATION_MAP[location] || LOCATION_MAP["United States"];
+    // Use location_code directly from client; fallback to 2840 (US)
+    const resolvedLocationCode = typeof location_code === "number" ? location_code : 2840;
+    const locationLabel = location || "United States";
 
-    // Use Live endpoint - returns results in a single request
     const results = [];
 
     for (const keyword of validKeywords) {
       const livePayload = [
         {
           keyword,
-          location_code: locationInfo.code,
+          location_code: resolvedLocationCode,
           language_code: "en",
           device: device === "mobile" ? "mobile" : "desktop",
           os: device === "mobile" ? "android" : "windows",
@@ -126,7 +117,7 @@ Deno.serve(async (req) => {
         },
       ];
 
-      console.log(`Fetching live results for: "${keyword}"...`);
+      console.log(`Fetching live results for: "${keyword}" (location_code: ${resolvedLocationCode})...`);
 
       const res = await fetch(
         "https://api.dataforseo.com/v3/serp/google/organic/live/advanced",
@@ -148,7 +139,7 @@ Deno.serve(async (req) => {
           position: "Error",
           url: "API Error",
           domain: cleanDomain,
-          location: location || "United States",
+          location: locationLabel,
           device: device || "desktop",
         });
         continue;
@@ -179,7 +170,7 @@ Deno.serve(async (req) => {
         position: matchRank ? String(matchRank) : "100+",
         url: matchLink || "Not Found",
         domain: cleanDomain,
-        location: location || "United States",
+        location: locationLabel,
         device: device || "desktop",
       });
     }
