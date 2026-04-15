@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Loader2, Search, BarChart3 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Progress } from "@/components/ui/progress";
+import { COUNTRIES } from "@/data/locations";
 
 interface RankFormProps {
   onResults: (results: any[]) => void;
@@ -9,23 +10,14 @@ interface RankFormProps {
   setLoading: (loading: boolean) => void;
 }
 
-const LOCATIONS = [
-  "United States",
-  "United Kingdom",
-  "India",
-  "Canada",
-  "Australia",
-  "Germany",
-  "France",
-];
-
 const MONTHLY_LIMIT = 10;
 
 export default function RankForm({ onResults, loading, setLoading }: RankFormProps) {
   const [formData, setFormData] = useState({
     keywords: "",
     domain: "",
-    location: "United States",
+    country: "United States",
+    subLocation: "",
     device: "desktop",
   });
   const [error, setError] = useState("");
@@ -37,9 +29,17 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
   } | null>(null);
   const abortRef = useRef(false);
 
+  const selectedCountry = COUNTRIES.find((c) => c.name === formData.country);
+  const subLocations = selectedCountry?.subLocations ?? [];
+
   useEffect(() => {
     fetchUsage();
   }, []);
+
+  // Reset sub-location when country changes
+  useEffect(() => {
+    setFormData((prev) => ({ ...prev, subLocation: "" }));
+  }, [formData.country]);
 
   const fetchUsage = async () => {
     try {
@@ -54,7 +54,6 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
         .eq("month", currentMonth)
         .maybeSingle();
 
-      // Fetch user's credit limit
       const { data: roleData } = await supabase
         .from("user_roles")
         .select("credits_limit")
@@ -109,9 +108,20 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
 
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const collectedResults: any[] = [];
-
-      // Clear previous results
       onResults([]);
+
+      // Determine location_code to send
+      let locationCode: number;
+      let locationLabel: string;
+
+      if (formData.subLocation && selectedCountry) {
+        const sub = selectedCountry.subLocations.find((s) => s.name === formData.subLocation);
+        locationCode = sub ? sub.code : selectedCountry.code;
+        locationLabel = `${formData.subLocation}, ${formData.country}`;
+      } else {
+        locationCode = selectedCountry?.code ?? 2840;
+        locationLabel = formData.country;
+      }
 
       for (let i = 0; i < keywordArray.length; i++) {
         if (abortRef.current) break;
@@ -133,8 +143,11 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
                 Authorization: `Bearer ${session.access_token}`,
               },
               body: JSON.stringify({
-                ...formData,
                 keywords: [keyword],
+                domain: formData.domain,
+                location_code: locationCode,
+                location: locationLabel,
+                device: formData.device,
               }),
             }
           );
@@ -147,7 +160,6 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
               setError(data.error || "Monthly limit reached");
               break;
             }
-            // Add error result for this keyword
             collectedResults.push({
               keyword,
               position: "Error",
@@ -159,10 +171,8 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
             collectedResults.push(...newResults);
           }
 
-          // Update results incrementally
           onResults([...collectedResults]);
 
-          // Delay 3-5 seconds between keywords (skip after last)
           if (i < keywordArray.length - 1 && !abortRef.current) {
             const delayMs = 3000 + Math.random() * 2000;
             await delay(delayMs);
@@ -258,15 +268,15 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium mb-2 text-muted-foreground">
-            Location
+            Country
           </label>
           <select
             className="w-full p-2.5 rounded-[var(--radius-inner)] bg-secondary/50 ring-1 ring-border outline-none text-sm"
-            value={formData.location}
-            onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+            value={formData.country}
+            onChange={(e) => setFormData({ ...formData, country: e.target.value })}
           >
-            {LOCATIONS.map((loc) => (
-              <option key={loc}>{loc}</option>
+            {COUNTRIES.map((c) => (
+              <option key={c.name} value={c.name}>{c.name}</option>
             ))}
           </select>
         </div>
@@ -284,6 +294,25 @@ export default function RankForm({ onResults, loading, setLoading }: RankFormPro
           </select>
         </div>
       </div>
+
+      {/* Sub-location dropdown */}
+      {subLocations.length > 0 && (
+        <div className="md:col-span-2">
+          <label className="block text-sm font-medium mb-2 text-muted-foreground">
+            State / Region <span className="text-muted-foreground/60">(optional — leave blank for entire country)</span>
+          </label>
+          <select
+            className="w-full p-2.5 rounded-[var(--radius-inner)] bg-secondary/50 ring-1 ring-border outline-none text-sm"
+            value={formData.subLocation}
+            onChange={(e) => setFormData({ ...formData, subLocation: e.target.value })}
+          >
+            <option value="">All of {formData.country}</option>
+            {subLocations.map((s) => (
+              <option key={s.name} value={s.name}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {error && (
         <div className="md:col-span-2 text-sm text-destructive bg-destructive/10 px-4 py-2.5 rounded-[var(--radius-inner)]">
