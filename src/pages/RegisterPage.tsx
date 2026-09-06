@@ -11,6 +11,7 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const [loading, setLoading] = useState(false);
 
   if (user) return <Navigate to="/" replace />;
@@ -40,6 +41,9 @@ export default function RegisterPage() {
     } else if (data.user && data.user.identities && data.user.identities.length === 0) {
       setError("An account with this email already exists. Please sign in instead.");
     } else {
+      // No session back means this Supabase project requires email confirmation
+      // before the account can sign in.
+      setNeedsConfirmation(!data.session);
       setSuccess(true);
     }
     setLoading(false);
@@ -51,7 +55,9 @@ export default function RegisterPage() {
         <div className="w-full max-w-sm bg-card rounded-[var(--radius)] shadow-card p-6 text-center space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Account created!</h2>
           <p className="text-sm text-muted-foreground">
-            Your account has been created successfully. You can now sign in.
+            {needsConfirmation
+              ? `We sent a confirmation link to ${email}. Open that link first — until then, signing in will fail with "Email not confirmed".`
+              : "Your account has been created successfully. You can now sign in."}
           </p>
           <Link to="/login" className="inline-block text-sm text-foreground font-medium hover:underline mt-2">
             Go to Login
